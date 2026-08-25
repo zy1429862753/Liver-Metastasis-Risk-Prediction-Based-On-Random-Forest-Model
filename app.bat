@@ -1,1 +1,1 @@
-streamlit run "F:\luojie4\Pythonjiu\app_rf.py"
+streamlit run "F:\luojie4.1\Pythonjiu\app_rf.py"

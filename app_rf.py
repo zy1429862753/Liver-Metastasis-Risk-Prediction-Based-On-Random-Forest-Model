@@ -1,202 +1,246 @@
-import streamlit as st
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
 import joblib
+import matplotlib.pyplot as plt
 import pandas as pd
 import plotly.graph_objects as go
 import shap
-import matplotlib.pyplot as plt
+import streamlit as st
 
-# ==========================================
-# 1. 变量映射配置 (全 15 个临床变量，完美适配肝转移字典)
-# ==========================================
+
+APP_DIR = Path(__file__).resolve().parent
+MODEL_PATH = APP_DIR / "rf_model_deploy.pkl"
+FEATURE_PATH = APP_DIR / "feature_names_rf.pkl"
+CONFIG_PATH = APP_DIR / "rf_deployment_config.json"
+
+
 VAR_CONFIG = {
-    "Age": {"<80 years (Code: 0)": 0, "≥80 years (Code: 1)": 1},
-    "Sex": {"Female (Code: 0)": 0, "Male (Code: 1)": 1},
-    "Race": {"Black (Code: 0)": 0, "White (Code: 1)": 1, "Others (Code: 2)": 2},
-    "Grade": {"I/II (Code: 0)": 0, "III/IV (Code: 1)": 1},
-    "Histological_type": {"Adenocarcinoma (Code: 0)": 0, "Others (Code: 1)": 1},
-    "T_stage": {"T0 (Code: 0)": 0, "T1 (Code: 1)": 1, "T2 (Code: 2)": 2, "T3 (Code: 3)": 3, "T4 (Code: 4)": 4},
-    "N_stage": {"N0 (Code: 0)": 0, "N+ (Code: 1)": 1},
-    "Bone_metastasis": {"No (Code: 0)": 0, "Yes (Code: 1)": 1},
-    "Brain_metastasis": {"No (Code: 0)": 0, "Yes (Code: 1)": 1},
-    "Lung_metastasis": {"No (Code: 0)": 0, "Yes (Code: 1)": 1},
-    "Tumor_size": {"<2.0 cm (Code: 0)": 0, "≥2.0 cm (Code: 1)": 1},
-    "Surgery": {"No (Code: 0)": 0, "Yes (Code: 1)": 1},
-    "Radiation": {"None/Unknown (Code: 0)": 0, "Yes (Code: 1)": 1},
-    "Chemotherapy": {"No/Unknown (Code: 0)": 0, "Yes (Code: 1)": 1},
-    "Marital_status": {"Unmarried (Code: 0)": 0, "Married (Code: 1)": 1}
+    "Age": {"<80 years": 0, "≥80 years": 1},
+    "Grade": {"Grade I/II": 0, "Grade III/IV": 1},
+    "Histological_type": {"Adenocarcinoma": 0, "Other histological type": 1},
+    "T_stage": {"T0": 0, "T1": 1, "T2": 2, "T3": 3, "T4": 4},
+    "N_stage": {"N0": 0, "N+": 1},
+    "Tumor_size": {"<2.0 cm": 0, "≥2.0 cm": 1},
+    "Marital_status": {"Unmarried": 0, "Married": 1},
 }
 
-# ==========================================
-# 2. 页面配置与 UI 样式
-# ==========================================
-st.set_page_config(page_title="Liver Metastasis Risk Tool", layout="wide")
-
-st.markdown("""
-<style>
-    .block-container {padding-top: 2rem !important;}
-    .main-header {
-        text-align: center; color: #333; margin-bottom: 20px; 
-        font-weight: 700; font-size: 28px;
-    }
-    .custom-label {
-        font-size: 16px !important; font-weight: 600; 
-        color: #444; margin-top: 15px; margin-bottom: 5px;
-    }
-    div[data-testid="stVerticalBlockBorderWrapper"] {
-        background-color: #f8f9fa; border: 1px solid #ddd; border-radius: 8px; padding: 15px;
-    }
-    div.stButton > button {
-        background-color: #1f77b4; color: white; font-size: 18px; 
-        height: 3em; border-radius: 8px; width: 100%; font-weight: bold;
-    }
-    .explanation-title {
-        color: #444; font-size: 20px; font-weight: 600; margin-top: 20px; margin-bottom: 10px;
-    }
-</style>
-""", unsafe_allow_html=True)
+DISPLAY_NAMES = {
+    "Age": "Age",
+    "Grade": "Histological grade",
+    "Histological_type": "Histological type",
+    "T_stage": "T stage",
+    "N_stage": "N stage",
+    "Tumor_size": "Tumor size",
+    "Marital_status": "Marital status",
+}
 
 
-# ==========================================
-# 3. 加载模型
-# ==========================================
+st.set_page_config(
+    page_title="Liver Metastasis Risk Tool",
+    page_icon="🔬",
+    layout="wide",
+)
+
+st.markdown(
+    """
+    <style>
+        .block-container {padding-top: 2rem !important; max-width: 1250px;}
+        .main-header {
+            text-align: center; color: #333; margin-bottom: 8px;
+            font-weight: 700; font-size: 28px;
+        }
+        .sub-header {
+            text-align: center; color: #666; margin-bottom: 22px; font-size: 15px;
+        }
+        .custom-label {
+            font-size: 16px !important; font-weight: 600;
+            color: #444; margin-top: 15px; margin-bottom: 5px;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"] {
+            background-color: #f8f9fa; border: 1px solid #ddd;
+            border-radius: 8px; padding: 15px;
+        }
+        div.stButton > button {
+            background-color: #1f77b4; color: white; font-size: 18px;
+            height: 3em; border-radius: 8px; width: 100%; font-weight: bold;
+        }
+        .explanation-title {
+            color: #444; font-size: 20px; font-weight: 600;
+            margin-top: 20px; margin-bottom: 10px;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
 @st.cache_resource
-def load_model():
-    try:
-        model = joblib.load("rf_model_deploy.pkl")
-        features = joblib.load("feature_names_rf.pkl")
-        return model, features
-    except Exception as e:
-        st.error(f"Failed to load model or features: {e}")
-        return None, []
+def load_deployment_artifacts():
+    model = joblib.load(MODEL_PATH)
+    features = joblib.load(FEATURE_PATH)
+    with CONFIG_PATH.open("r", encoding="utf-8") as file:
+        config = json.load(file)
+
+    if features != config.get("features"):
+        raise ValueError("Feature order differs between feature_names_rf.pkl and config.")
+    missing_ui_config = [feature for feature in features if feature not in VAR_CONFIG]
+    if missing_ui_config:
+        raise ValueError(f"Missing UI mapping for: {missing_ui_config}")
+    if not 0 < float(config["decision_threshold"]) < 1:
+        raise ValueError("The deployment decision threshold must be between 0 and 1.")
+    return model, features, config
 
 
-model, feature_names = load_model()
+def positive_class_explanation(model, input_frame: pd.DataFrame, feature_names: list[str]):
+    explainer = shap.TreeExplainer(model)
+    explanation = explainer(input_frame)
 
-# ==========================================
-# 4. 界面逻辑
-# ==========================================
-st.markdown("<div class='main-header'>Liver Metastasis Risk Prediction Based On Random Forest</div>",
-            unsafe_allow_html=True)
+    if explanation.values.ndim == 3:
+        positive = explanation[0, :, 1]
+    elif explanation.values.ndim == 2:
+        positive = explanation[0]
+    else:
+        raise ValueError(f"Unexpected SHAP output shape: {explanation.values.shape}")
+    positive.feature_names = [DISPLAY_NAMES[name] for name in feature_names]
+    return positive
 
-user_input_values = {}
 
-if not model:
-    st.error("⚠️ 未找到模型或特征文件，请确认 rf_model_deploy.pkl 和 feature_names_rf.pkl 在同一目录下。")
-else:
+st.markdown(
+    "<div class='main-header'>Liver Metastasis Risk Prediction Based on Random Forest</div>",
+    unsafe_allow_html=True,
+)
+st.markdown(
+    "<div class='sub-header'>Seven-variable research model with an independently locked decision threshold</div>",
+    unsafe_allow_html=True,
+)
+
+try:
+    model, feature_names, deployment_config = load_deployment_artifacts()
+except Exception as error:
+    model, feature_names, deployment_config = None, [], {}
+    st.error(
+        "Failed to load the deployment files. Confirm that rf_model_deploy.pkl, "
+        "feature_names_rf.pkl, and rf_deployment_config.json are in the App directory. "
+        f"Details: {error}"
+    )
+
+
+if model is not None:
+    decision_threshold = float(deployment_config["decision_threshold"])
+    threshold_percent = decision_threshold * 100
+    user_input_values: dict[str, int] = {}
+
     col_input, col_result = st.columns([2, 2], gap="large")
 
     with col_input:
         with st.container(border=True):
-            st.markdown("### Patient Parameters")
+            st.markdown("### Patient parameters")
             cols = st.columns(2)
 
-            for idx, feature in enumerate(feature_names):
-                current_col = cols[idx % 2]
-                with current_col:
-                    display_name = feature.replace('_', ' ')
-                    st.markdown(f"<div class='custom-label'>{display_name}</div>", unsafe_allow_html=True)
-
-                    if feature in VAR_CONFIG:
-                        options_map = VAR_CONFIG[feature]
-                        options_labels = list(options_map.keys())
-
-                        selected_label = st.radio(
-                            label=f"radio_{feature}",
-                            options=options_labels,
-                            key=feature,
-                            label_visibility="collapsed",
-                            horizontal=True
-                        )
-                        user_input_values[feature] = options_map[selected_label]
+            for index, feature in enumerate(feature_names):
+                with cols[index % 2]:
+                    st.markdown(
+                        f"<div class='custom-label'>{DISPLAY_NAMES[feature]}</div>",
+                        unsafe_allow_html=True,
+                    )
+                    options_map = VAR_CONFIG[feature]
+                    selected_label = st.radio(
+                        label=f"radio_{feature}",
+                        options=list(options_map),
+                        key=feature,
+                        label_visibility="collapsed",
+                        horizontal=True,
+                    )
+                    user_input_values[feature] = options_map[selected_label]
 
     with col_result:
         st.markdown("<div style='height: 20px'></div>", unsafe_allow_html=True)
 
         with st.container(border=True):
-            st.markdown("### Prediction Result & Explanation")
+            st.markdown("### Prediction result and explanation")
+            result_placeholder = st.empty()
+            chart_placeholder = st.empty()
 
-            res_ph = st.empty()
-            chart_ph = st.empty()
-            shap_ph = st.empty()
-
-            if st.button("🚀 Calculate Risk"):
+            if st.button("Calculate risk", type="primary"):
                 try:
-                    input_df = pd.DataFrame([user_input_values], columns=feature_names)
+                    input_frame = pd.DataFrame(
+                        [user_input_values], columns=feature_names, dtype=float
+                    )
+                    predicted_probability = float(model.predict_proba(input_frame)[0, 1])
+                    risk_percent = predicted_probability * 100
+                    above_threshold = predicted_probability >= decision_threshold
 
-                    # 获取经过校准后的真实临床概率
-                    pred_prob = model.predict_proba(input_df)[0][1]
-                    risk_percent = pred_prob * 100
-
-                    # 💡 核心修改：基于真实 25% 阳性率设定的全新阈值
-                    if risk_percent < 20:
-                        bar_color = "#2ca02c"  # 绿色
-                        res_ph.success(f"**Low Risk**: The probability of Liver Metastasis is {risk_percent:.1f}%")
-                    elif risk_percent < 40:
-                        bar_color = "#ff7f0e"  # 橙色
-                        res_ph.warning(f"**Medium Risk**: The probability of Liver Metastasis is {risk_percent:.1f}%")
+                    if above_threshold:
+                        bar_color = "#d62728"
+                        result_placeholder.error(
+                            f"**Higher model-predicted risk:** {risk_percent:.1f}% "
+                            f"(at or above the locked {threshold_percent:.1f}% threshold)"
+                        )
                     else:
-                        bar_color = "#d62728"  # 红色
-                        res_ph.error(f"**High Risk**: The probability of Liver Metastasis is {risk_percent:.1f}%")
+                        bar_color = "#2ca02c"
+                        result_placeholder.success(
+                            f"**Lower model-predicted risk:** {risk_percent:.1f}% "
+                            f"(below the locked {threshold_percent:.1f}% threshold)"
+                        )
 
-                    # 绘制仪表盘
-                    fig = go.Figure(go.Indicator(
-                        mode="gauge+number",
-                        value=risk_percent,
-                        number={'suffix': "%", 'font': {'size': 35, 'color': "#333"}},
-                        gauge={
-                            'axis': {'range': [0, 100]},
-                            'bar': {'color': bar_color},
-                            'bgcolor': "white",
-                            'steps': [{'range': [0, 100], 'color': '#f0f2f6'}],
-                            'threshold': {
-                                'line': {'color': "black", 'width': 3},
-                                'thickness': 0.75,
-                                'value': risk_percent
-                            }
-                        }
-                    ))
-                    fig.update_layout(height=200, margin=dict(l=20, r=20, t=30, b=10))
-                    chart_ph.plotly_chart(fig, use_container_width=True)
-
-                    # --- SHAP 瀑布图 ---
-                    st.markdown("<div class='explanation-title'>Why this prediction? (SHAP Waterfall Plot)</div>",
-                                unsafe_allow_html=True)
-                    # 💡 修改图注，向临床医生解释 SHAP 分数与上方真实概率的关系
+                    gauge = go.Figure(
+                        go.Indicator(
+                            mode="gauge+number",
+                            value=risk_percent,
+                            number={"suffix": "%", "font": {"size": 35, "color": "#333"}},
+                            gauge={
+                                "axis": {"range": [0, 100]},
+                                "bar": {"color": bar_color},
+                                "bgcolor": "white",
+                                "steps": [{"range": [0, 100], "color": "#f0f2f6"}],
+                                "threshold": {
+                                    "line": {"color": "black", "width": 3},
+                                    "thickness": 0.75,
+                                    "value": threshold_percent,
+                                },
+                            },
+                        )
+                    )
+                    gauge.update_layout(height=220, margin=dict(l=20, r=20, t=35, b=10))
+                    chart_placeholder.plotly_chart(gauge, width="stretch")
                     st.caption(
-                        "Note: The SHAP plot illustrates the model's internal risk scoring logic. Red bars increase the internal score, blue bars decrease it. This internal score is then mathematically calibrated to the true probability shown above.")
+                        f"Black line: {threshold_percent:.1f}% cutoff selected from five-fold "
+                        "out-of-fold predictions in the training cohort using the Youden index."
+                    )
 
-                    with st.spinner('Generating Explanation...'):
+                    st.markdown(
+                        "<div class='explanation-title'>Why this prediction? (SHAP waterfall plot)</div>",
+                        unsafe_allow_html=True,
+                    )
+                    st.caption(
+                        "Red features increase and blue features decrease the Random Forest "
+                        "probability estimate for this patient."
+                    )
+                    with st.spinner("Generating explanation..."):
+                        positive_explanation = positive_class_explanation(
+                            model, input_frame, feature_names
+                        )
+                        plt.figure(figsize=(8.5, 5.0))
+                        shap.plots.waterfall(
+                            positive_explanation,
+                            max_display=len(feature_names),
+                            show=False,
+                        )
+                        shap_figure = plt.gcf()
+                        shap_figure.tight_layout()
+                        st.pyplot(shap_figure, width="stretch")
+                        plt.close(shap_figure)
 
-                        # ==============================================================
-                        # 💡 核心修复：从校准器中提取纯正的随机森林模型，供 SHAP 解析
-                        # 兼容不同版本的 scikit-learn (1.2+ 使用 estimator，旧版使用 base_estimator)
-                        # ==============================================================
-                        if hasattr(model, 'calibrated_classifiers_'):
-                            calibrated_clf = model.calibrated_classifiers_[0]
-                            if hasattr(calibrated_clf, 'estimator'):
-                                shap_model = calibrated_clf.estimator
-                            else:
-                                shap_model = calibrated_clf.base_estimator
-                        else:
-                            shap_model = model
-
-                        # 使用提取出来的基础随机森林模型
-                        explainer = shap.TreeExplainer(shap_model)
-                        shap_explanation = explainer(input_df)
-
-                        if len(shap_explanation.shape) == 3:
-                            explanation_pos = shap_explanation[0, :, 1]
-                        else:
-                            explanation_pos = shap_explanation[0]
-
-                        fig_shap, ax_shap = plt.subplots(figsize=(8, 4))
-                        explanation_pos.feature_names = [name.replace('_', ' ') for name in feature_names]
-
-                        shap.plots.waterfall(explanation_pos, show=False)
-                        st.pyplot(fig_shap, bbox_inches='tight')
-                        plt.close(fig_shap)
-
-                except Exception as e:
-                    st.error(f"Prediction Error: {str(e)}")
+                except Exception as error:
+                    st.error(f"Prediction error: {error}")
             else:
-                chart_ph.info("Click 'Calculate Risk' to see the probability and explanation.")
+                chart_placeholder.info("Click 'Calculate risk' to view the result and explanation.")
+
+    st.divider()
+    st.caption(
+        "Research use only. The displayed value is an uncalibrated Random Forest probability "
+        "estimate and must not be interpreted as a diagnosis or replace clinical judgement."
+    )
