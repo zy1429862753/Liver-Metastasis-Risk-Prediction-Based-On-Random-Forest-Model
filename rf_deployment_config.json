@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "outcome": "Liver_metastasis",
+  "model_type": "RandomForestClassifier",
+  "model_name": "Random Forest",
+  "seed": 20,
+  "features": [
+    "Age",
+    "Grade",
+    "Histological_type",
+    "T_stage",
+    "N_stage",
+    "Tumor_size",
+    "Marital_status"
+  ],
+  "feature_allowed_values": {
+    "Age": [
+      0.0,
+      1.0
+    ],
+    "Grade": [
+      0.0,
+      1.0
+    ],
+    "Histological_type": [
+      0.0,
+      1.0
+    ],
+    "T_stage": [
+      0.0,
+      1.0,
+      2.0,
+      3.0,
+      4.0
+    ],
+    "N_stage": [
+      0.0,
+      1.0
+    ],
+    "Tumor_size": [
+      0.0,
+      1.0
+    ],
+    "Marital_status": [
+      0.0,
+      1.0
+    ]
+  },
+  "rf_params": {
+    "n_estimators": 100,
+    "max_depth": 6,
+    "min_samples_split": 6,
+    "min_samples_leaf": 2
+  },
+  "decision_threshold": 0.0974031148462129,
+  "threshold_source": "Training five-fold out-of-fold Youden index",
+  "training_samples": 4392,
+  "validation_samples": 1882,
+  "training_prevalence": 0.11065573770491803,
+  "validation_prevalence": 0.11955366631243358,
+  "performance": {
+    "training": {
+      "roc_auc": 0.7542658861854401,
+      "pr_auc": 0.26771371870596106,
+      "sensitivity": 0.8271604938271605,
+      "specificity": 0.5419866871479775,
+      "precision": 0.18347786398904609,
+      "f1": 0.30033619723571164
+    },
+    "validation": {
+      "roc_auc": 0.7039991953329311,
+      "pr_auc": 0.20755208255574428,
+      "sensitivity": 0.8133333333333334,
+      "specificity": 0.5425467712733857,
+      "precision": 0.1944739638682253,
+      "f1": 0.313893653516295
+    }
+  },
+  "software": {
+    "python": "3.13.9",
+    "scikit_learn": "1.7.2",
+    "pandas": "2.3.3",
+    "numpy": "2.3.5",
+    "joblib": "1.5.2"
+  },
+  "notes": [
+    "Probabilities are uncalibrated Random Forest estimates.",
+    "The validation cohort was not used to choose the decision threshold.",
+    "This research model is not a substitute for clinical judgement."
+  ]
+}
